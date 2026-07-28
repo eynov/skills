@@ -73,6 +73,44 @@ bash skills.sh uninstall --claude --remove-marketplace
 
 所有操作都是幂等的，重复执行安全。
 
+## 日常维护
+
+查看安装状态（以及是否与当前仓库一致）：
+
+```bash
+bash skills.sh status
+```
+
+环境检查（CLI、清单文件、权限、残留、远端可达性）：
+
+```bash
+bash skills.sh doctor
+```
+
+运行本仓库的完整测试：
+
+```bash
+bash skills.sh self-test
+```
+
+更新到新版本 —— 先拉取，再重新部署：
+
+```bash
+git pull --ff-only
+bash skills.sh update
+```
+
+`status` 会显示当前部署的版本，以及它是否仍与仓库一致：
+
+| 状态 | 含义 |
+|---|---|
+| `Up to date` | 已安装的副本与当前仓库一致 |
+| `Update available` | 已安装的副本与仓库不同 —— 执行 `skills.sh update` |
+| `Unknown` | 无法读取或无法比较，**不猜测** |
+| `External install` | 由本仓库以外的方式安装（手动安装或其他 checkout） |
+
+`status` 与 `doctor` 都是严格只读的，不会修改任何文件。
+
 ## 默认按需启用（opt-in）
 
 **安装本身不会改变 Agent 的任何行为。** 在你主动调用之前，Skill 始终处于未激活状态，

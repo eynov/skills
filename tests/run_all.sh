@@ -56,6 +56,10 @@ echo "########## skills.sh lifecycle (install/update/enable/disable/uninstall) #
 bash "$repo_root/tests/test_install.sh" || fail=1
 
 echo
+echo "########## skills.sh hardening (capabilities/versions/status/self-test) ##########"
+bash "$repo_root/tests/test_hardening.sh" || fail=1
+
+echo
 if [ "$fail" -eq 0 ]; then
   echo "ALL CHECKS PASSED"
 else

@@ -142,15 +142,58 @@ src_ok() {
   esac
 }
 
-case "${1:-}" in
-  --version) echo "1.2.3 (Claude Code Mock)"; exit 0 ;;
-  plugin) shift ;;
-  *) echo "mock claude: unsupported: ${1:-}" >&2; exit 1 ;;
-esac
+# The group name this mock responds to; tests override to simulate a rename.
+GROUP="${MOCK_PLUGIN_GROUP:-plugin}"
+MPGROUP="${MOCK_MARKETPLACE_GROUP:-marketplace}"
+
+# Top-level --help must advertise the group token, since capability detection
+# looks for the identifier rather than parsing prose or gating on a version.
+if [ "${1:-}" = "--help" ] || [ -z "${1:-}" ]; then
+  echo "Usage: claude [options] [command]"
+  echo "Commands:"
+  [ "${MOCK_HIDE_PLUGIN_GROUP:-0}" = "1" ] || echo "  $GROUP    Manage plugins"
+  echo "  mcp       Manage MCP servers"
+  exit 0
+fi
 
 case "${1:-}" in
-  marketplace)
+  --version)
+    [ "${MOCK_VERSION_FAILS:-0}" = "1" ] && exit 1
+    echo "${MOCK_CLAUDE_VERSION:-1.2.3 (Claude Code Mock)}"; exit 0 ;;
+esac
+
+if [ "${1:-}" != "$GROUP" ]; then
+  # Unknown group: mimic the real CLI, which falls back to top-level help
+  # and still exits 0 — which is exactly why exit codes cannot be trusted.
+  echo "Usage: claude [options] [command]"
+  echo "Commands:"
+  [ "${MOCK_HIDE_PLUGIN_GROUP:-0}" = "1" ] || echo "  $GROUP    Manage plugins"
+  exit 0
+fi
+shift
+
+# Group help: advertise available subcommands as bare tokens.
+if [ "${1:-}" = "--help" ] || [ -z "${1:-}" ]; then
+  echo "Usage: claude $GROUP [command]"
+  echo "Commands:"
+  for sub in ${MOCK_PLUGIN_SUBS:-install list uninstall update enable disable}; do
+    echo "  $sub"
+  done
+  [ "${MOCK_HIDE_MARKETPLACE:-0}" = "1" ] || echo "  $MPGROUP"
+  exit 0
+fi
+
+case "${1:-}" in
+  "$MPGROUP")
     shift
+    if [ "${1:-}" = "--help" ] || [ -z "${1:-}" ]; then
+      echo "Usage: claude $GROUP $MPGROUP [command]"
+      echo "Commands:"
+      for sub in ${MOCK_MARKETPLACE_SUBS:-add list remove update}; do
+        echo "  $sub"
+      done
+      exit 0
+    fi
     case "${1:-}" in
       add)
         shift
@@ -222,7 +265,7 @@ case "${1:-}" in
         [ -n "$id" ] || continue
         [ $first -eq 1 ] || out="$out,"
         first=0
-        out="$out{\"id\":\"$id\",\"version\":\"$ver\",\"scope\":\"user\",\"enabled\":$en}"
+        out="$out{\"id\":\"$id\",\"version\":\"$ver\",\"scope\":\"user\",\"enabled\":$en,\"installPath\":\"${MOCK_INSTALL_PATH:-}\"}"
       done <"$pl"
       echo "$out]"
     else

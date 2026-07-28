@@ -75,6 +75,44 @@ bash skills.sh uninstall --claude --remove-marketplace
 
 Everything is idempotent — running any command twice is safe.
 
+## Maintenance
+
+Check what's installed and whether it matches this checkout:
+
+```bash
+bash skills.sh status
+```
+
+Check the environment (CLIs, manifests, permissions, leftovers, remotes):
+
+```bash
+bash skills.sh doctor
+```
+
+Run the full test suite against this checkout:
+
+```bash
+bash skills.sh self-test
+```
+
+Update to a newer version — fetch first, then redeploy:
+
+```bash
+git pull --ff-only
+bash skills.sh update
+```
+
+`status` tells you which revision is deployed and whether it still matches the repo:
+
+| Status | Meaning |
+|---|---|
+| `Up to date` | The installed copy matches this checkout |
+| `Update available` | The installed copy differs — run `skills.sh update` |
+| `Unknown` | The installed copy can't be read or compared |
+| `External install` | Installed by something other than this checkout |
+
+`status` and `doctor` are strictly read-only and never modify anything.
+
 ## On-demand by default
 
 Installing changes nothing on its own. The skill stays inert until you invoke it, on both

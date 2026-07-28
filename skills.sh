@@ -9,6 +9,7 @@
 #   disable    turn off permanent mode (the skill stays installed)
 #   status     read-only report of what is installed and enabled
 #   doctor     read-only diagnostics
+#   self-test  run this repository's full test suite
 #   help       usage
 #
 # Design notes:
@@ -127,50 +128,279 @@ have_claude() { find_claude_cli >/dev/null 2>&1; }
 have_codex()  { find_codex_cli  >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------------------
+# Capability detection
+#
+# We drive the Claude CLI through whatever subcommand names it actually
+# advertises, rather than hardcoding them or gating on a version number.
+#
+# Exit codes alone are not usable for this: `claude <unknown-group> --help`
+# exits 0 (it falls back to printing top-level help), and
+# `claude plugin <unknown-sub> --help` exits 0 as well. So a probe based only on
+# exit status reports every subcommand as supported.
+#
+# Instead we look for the subcommand *identifier* in the relevant `--help`
+# output. Command identifiers are stable tokens, not translated prose, so this
+# does not depend on any particular English sentence or output layout — only on
+# the CLI listing its own subcommand names somewhere in its help.
+#
+# If the CLI is reorganised (say `plugin` becomes `plugins`), the candidate
+# lists below let us adapt automatically. If nothing matches, we report
+# "CLI interface changed" rather than failing with a confusing error.
+# ---------------------------------------------------------------------------
+
+CAP_PLUGIN_GROUP=""      # e.g. "plugin"
+CAP_MARKETPLACE_GROUP="" # e.g. "marketplace"
+CAP_PROBED="no"
+
+# Does <token> appear as a word in the help output of the given command?
+_help_lists_token() {  # _help_lists_token <token> <cmd> [args...]
+  local token="$1"; shift
+  "$@" --help 2>&1 | grep -qw -- "$token"
+}
+
+# Discover the plugin group name and the marketplace group name. Safe to call
+# repeatedly; results are cached for the life of the process.
+probe_claude_capabilities() {
+  [ "$CAP_PROBED" = "yes" ] && return 0
+  CAP_PROBED="yes"
+
+  local cli
+  cli="$(find_claude_cli 2>/dev/null)" || return 1
+
+  local candidate
+  for candidate in plugin plugins; do
+    if _help_lists_token "$candidate" "$cli"; then
+      CAP_PLUGIN_GROUP="$candidate"; break
+    fi
+  done
+  [ -n "$CAP_PLUGIN_GROUP" ] || return 1
+
+  for candidate in marketplace marketplaces; do
+    if _help_lists_token "$candidate" "$cli" "$CAP_PLUGIN_GROUP"; then
+      CAP_MARKETPLACE_GROUP="$candidate"; break
+    fi
+  done
+  return 0
+}
+
+# Is <subcommand> available under the plugin group?
+claude_supports() {  # claude_supports <subcommand>
+  probe_claude_capabilities || return 1
+  [ -n "$CAP_PLUGIN_GROUP" ] || return 1
+  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
+  _help_lists_token "$1" "$cli" "$CAP_PLUGIN_GROUP"
+}
+
+# Is <subcommand> available under the marketplace group?
+claude_marketplace_supports() {  # claude_marketplace_supports <subcommand>
+  probe_claude_capabilities || return 1
+  [ -n "$CAP_MARKETPLACE_GROUP" ] || return 1
+  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
+  _help_lists_token "$1" "$cli" "$CAP_PLUGIN_GROUP" "$CAP_MARKETPLACE_GROUP"
+}
+
+# Run `claude <plugin-group> ...`
+claude_plugin_cmd() {
+  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
+  probe_claude_capabilities || return 1
+  [ -n "$CAP_PLUGIN_GROUP" ] || return 1
+  "$cli" "$CAP_PLUGIN_GROUP" "$@"
+}
+
+# Run `claude <plugin-group> <marketplace-group> ...`
+claude_marketplace_cmd() {
+  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
+  probe_claude_capabilities || return 1
+  [ -n "$CAP_PLUGIN_GROUP" ] && [ -n "$CAP_MARKETPLACE_GROUP" ] || return 1
+  "$cli" "$CAP_PLUGIN_GROUP" "$CAP_MARKETPLACE_GROUP" "$@"
+}
+
+# The subcommands install/update actually need. Returns the missing ones.
+claude_missing_capabilities() {
+  local missing=""
+  probe_claude_capabilities || { printf 'plugin-group\n'; return 0; }
+  if [ -z "$CAP_PLUGIN_GROUP" ]; then printf 'plugin-group\n'; return 0; fi
+  local sub
+  for sub in install list uninstall; do
+    claude_supports "$sub" || missing="$missing $sub"
+  done
+  if [ -z "$CAP_MARKETPLACE_GROUP" ]; then
+    missing="$missing marketplace-group"
+  else
+    for sub in add list; do
+      claude_marketplace_supports "$sub" || missing="$missing marketplace-$sub"
+    done
+  fi
+  printf '%s\n' "${missing# }"
+}
+
+# A human-readable version string, or "unknown". Never fails the caller.
+claude_version_string() {
+  local cli v
+  cli="$(find_claude_cli 2>/dev/null)" || { printf 'unknown\n'; return 0; }
+  v="$("$cli" --version 2>/dev/null | head -1 | tr -d '\r')" || v=""
+  [ -n "$v" ] && printf '%s\n' "$v" || printf 'unknown\n'
+}
+
+codex_version_string() {
+  local cli v
+  cli="$(find_codex_cli 2>/dev/null)" || { printf 'unknown\n'; return 0; }
+  v="$("$cli" --version 2>/dev/null | head -1 | tr -d '\r')" || v=""
+  [ -n "$v" ] && printf '%s\n' "$v" || printf 'unknown\n'
+}
+
+# ---------------------------------------------------------------------------
 # Install-state probes (read-only)
 # ---------------------------------------------------------------------------
 
 claude_plugin_installed() {
-  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
   local json
-  json="$("$cli" plugin list --json 2>/dev/null)" || return 1
+  json="$(claude_plugin_cmd list --json 2>/dev/null)" || return 1
   printf '%s' "$json" | jq -e --arg id "$PLUGIN_ID" \
     'if type=="array" then any(.[]; .id == $id) else false end' >/dev/null 2>&1
 }
 
 claude_plugin_enabled() {
-  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
   local json
-  json="$("$cli" plugin list --json 2>/dev/null)" || return 1
+  json="$(claude_plugin_cmd list --json 2>/dev/null)" || return 1
   printf '%s' "$json" | jq -e --arg id "$PLUGIN_ID" \
     'if type=="array" then any(.[]; .id == $id and .enabled == true) else false end' >/dev/null 2>&1
 }
 
 claude_plugin_version() {
-  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
-  "$cli" plugin list --json 2>/dev/null \
+  claude_plugin_cmd list --json 2>/dev/null \
     | jq -r --arg id "$PLUGIN_ID" \
       'if type=="array" then (.[] | select(.id==$id) | .version) else empty end' 2>/dev/null \
     | head -1
 }
 
+# Where Claude Code unpacked the plugin, if it reports it.
+claude_plugin_install_path() {
+  claude_plugin_cmd list --json 2>/dev/null \
+    | jq -r --arg id "$PLUGIN_ID" \
+      'if type=="array" then (.[] | select(.id==$id) | .installPath // empty) else empty end' 2>/dev/null \
+    | head -1
+}
+
 claude_marketplace_present() {
-  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 1
-  "$cli" plugin marketplace list --json 2>/dev/null \
+  claude_marketplace_cmd list --json 2>/dev/null \
     | jq -e --arg n "$MARKETPLACE_NAME" \
       'if type=="array" then any(.[]; .name == $n) else false end' >/dev/null 2>&1
 }
 
 # Other plugins installed from our marketplace — guards --remove-marketplace.
 claude_other_plugins_in_marketplace() {
-  local cli; cli="$(find_claude_cli 2>/dev/null)" || return 0
-  "$cli" plugin list --json 2>/dev/null \
+  claude_plugin_cmd list --json 2>/dev/null \
     | jq -r --arg mp "@$MARKETPLACE_NAME" --arg id "$PLUGIN_ID" \
       'if type=="array" then (.[] | select(.id != $id) | select(.id | endswith($mp)) | .id) else empty end' 2>/dev/null
 }
 
 claude_permanent_on() { [ -f "$(claude_flag_file)" ]; }
 codex_skill_installed() { [ -f "$(codex_skill_dir)/SKILL.md" ]; }
+
+# ---------------------------------------------------------------------------
+# Provenance and fingerprints
+#
+# A fingerprint is a content hash of the skill payload, so "is the installed
+# copy the same as this repo's copy" is answerable without guessing.
+#
+# Provenance is a small JSON record written NEXT TO the install (never inside
+# the deployed skill directory, so the deployed payload stays byte-identical to
+# the repo). It records which checkout deployed it and at which commit, which
+# is what lets status distinguish "installed by this repo" from an external or
+# manual install.
+# ---------------------------------------------------------------------------
+
+CLAUDE_PROVENANCE_FILE() { printf '%s\n' "$(claude_config_dir)/.${SKILL_NAME}-install.json"; }
+CODEX_PROVENANCE_FILE()  { printf '%s\n' "$(codex_home)/.${SKILL_NAME}-install.json"; }
+
+# Hash of the skill payload in a directory. Empty output means "cannot tell".
+payload_fingerprint() {  # payload_fingerprint <dir>
+  local dir="$1"
+  [ -f "$dir/SKILL.md" ] || return 1
+  command -v sha256sum >/dev/null 2>&1 || return 1
+  {
+    cat "$dir/SKILL.md"
+    [ -f "$dir/agents/openai.yaml" ] && cat "$dir/agents/openai.yaml"
+  } 2>/dev/null | sha256sum | cut -d' ' -f1
+}
+
+repo_fingerprint() { payload_fingerprint "$SKILL_SRC"; }
+
+repo_commit_full() {
+  if command -v git >/dev/null 2>&1 && [ -d "$REPO_ROOT/.git" ]; then
+    git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+write_provenance() {  # write_provenance <file> <source-note>
+  local file="$1" source_note="${2:-}" commit fp now
+  commit="$(repo_commit_full 2>/dev/null || echo '')"
+  fp="$(repo_fingerprint 2>/dev/null || echo '')"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '')"
+  mkdir -p -- "$(dirname -- "$file")" 2>/dev/null || return 0
+  # Best-effort: provenance is a convenience, never a reason to fail an install.
+  cat >"$file" 2>/dev/null <<EOF || return 0
+{
+  "installed_by": "skills.sh",
+  "skill": "$SKILL_NAME",
+  "repo_root": "$REPO_ROOT",
+  "repo_commit": "$commit",
+  "payload_fingerprint": "$fp",
+  "source": "$source_note",
+  "installed_at": "$now"
+}
+EOF
+  return 0
+}
+
+read_provenance_field() {  # read_provenance_field <file> <key>
+  local file="$1" key="$2"
+  [ -f "$file" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -r --arg k "$key" '.[$k] // empty' "$file" 2>/dev/null
+}
+
+remove_provenance() { [ -f "$1" ] && rm -f -- "$1"; return 0; }
+
+# Classify an install: managed-by-this-repo, external, or unknown.
+#   $1 provenance file, $2 installed payload dir ("" if unknown)
+# Echoes one of: managed | external | unknown
+install_origin() {
+  local prov="$1" root
+  if [ -f "$prov" ]; then
+    root="$(read_provenance_field "$prov" repo_root 2>/dev/null || echo '')"
+    if [ -n "$root" ] && [ "$root" = "$REPO_ROOT" ]; then
+      printf 'managed\n'; return 0
+    fi
+    printf 'external\n'; return 0
+  fi
+  printf 'unknown\n'
+}
+
+# Compare installed payload against this repo.
+#   Echoes: up-to-date | update-available | unknown
+sync_state() {  # sync_state <installed-payload-dir>
+  local dir="$1" a b
+  [ -n "$dir" ] && [ -d "$dir" ] || { printf 'unknown\n'; return 0; }
+  a="$(repo_fingerprint 2>/dev/null || echo '')"
+  b="$(payload_fingerprint "$dir" 2>/dev/null || echo '')"
+  if [ -z "$a" ] || [ -z "$b" ]; then printf 'unknown\n'; return 0; fi
+  if [ "$a" = "$b" ]; then printf 'up-to-date\n'; else printf 'update-available\n'; fi
+}
+
+# Where Claude's installed copy of the skill payload lives, if discoverable.
+claude_installed_payload_dir() {
+  local base
+  base="$(claude_plugin_install_path 2>/dev/null || true)"
+  [ -n "$base" ] || return 1
+  if [ -f "$base/skills/$SKILL_NAME/SKILL.md" ]; then
+    printf '%s\n' "$base/skills/$SKILL_NAME"; return 0
+  fi
+  if [ -f "$base/SKILL.md" ]; then printf '%s\n' "$base"; return 0; fi
+  return 1
+}
 
 codex_permanent_on() {
   local f; f="$(codex_home)/AGENTS.md"
@@ -245,7 +475,7 @@ claude_add_marketplace() {
   for src in "${candidates[@]}"; do
     url="$(source_url_for "$src")" || continue
     step "adding marketplace from $src ($url)"
-    if "$cli" plugin marketplace add "$url" >/dev/null 2>&1; then
+    if claude_marketplace_cmd add "$url" >/dev/null 2>&1; then
       ok "marketplace added from $src"
       return 0
     fi
@@ -268,15 +498,27 @@ claude_install() {
   step "Claude Code: installing $SKILL_NAME"
   dim "  cli: $cli"
 
+  # Adapt to whatever subcommand names this CLI advertises before driving it.
+  local missing; missing="$(claude_missing_capabilities)"
+  if [ -n "$missing" ]; then
+    err "Claude Code CLI interface changed: cannot find the subcommands this installer needs."
+    err "  missing: $missing"
+    info "  This usually means the CLI reorganised its commands. Install manually with the"
+    info "  commands shown in INSTALL.md, or update this tool."
+    record_fail "claude" "CLI interface changed ($missing)"
+    return 1
+  fi
+
   claude_add_marketplace "$source_pref" "$cli" || { record_fail "claude" "marketplace setup failed"; return 1; }
 
-  if ! "$cli" plugin install "$PLUGIN_ID" >/dev/null 2>&1; then
+  if ! claude_plugin_cmd install "$PLUGIN_ID" >/dev/null 2>&1; then
     record_fail "claude" "plugin install failed"
     return 1
   fi
 
   if claude_plugin_installed; then
     ok "plugin installed ($PLUGIN_ID $(claude_plugin_version 2>/dev/null || echo '?'))"
+    write_provenance "$(CLAUDE_PROVENANCE_FILE)" "marketplace:$source_pref"
   else
     record_fail "claude" "plugin not present after install"
     return 1
@@ -308,11 +550,12 @@ claude_update() {
     claude_add_marketplace "$source_pref" "$cli" || { record_fail "claude" "marketplace setup failed"; return 1; }
   fi
 
-  "$cli" plugin marketplace update "$MARKETPLACE_NAME" >/dev/null 2>&1 \
+  claude_marketplace_cmd update "$MARKETPLACE_NAME" >/dev/null 2>&1 \
     || warn "marketplace refresh reported a problem; continuing to plugin update"
 
-  if "$cli" plugin update "$PLUGIN_ID" >/dev/null 2>&1; then
+  if claude_plugin_cmd update "$PLUGIN_ID" >/dev/null 2>&1; then
     ok "plugin updated ($(claude_plugin_version 2>/dev/null || echo '?')) — restart Claude Code to apply"
+    write_provenance "$(CLAUDE_PROVENANCE_FILE)" "marketplace:$source_pref"
     record_ok "claude" "updated"
     return 0
   fi
@@ -332,7 +575,7 @@ claude_uninstall() {
   claude_disable_quiet
 
   if claude_plugin_installed; then
-    if "$cli" plugin uninstall "$SKILL_NAME" >/dev/null 2>&1; then
+    if claude_plugin_cmd uninstall "$SKILL_NAME" >/dev/null 2>&1; then
       ok "plugin uninstalled"
     else
       record_fail "claude" "plugin uninstall failed"
@@ -341,6 +584,7 @@ claude_uninstall() {
   else
     ok "plugin was not installed (nothing to do)"
   fi
+  remove_provenance "$(CLAUDE_PROVENANCE_FILE)"
 
   if [ "$remove_marketplace" = "yes" ]; then
     local others
@@ -354,7 +598,7 @@ claude_uninstall() {
       return 1
     fi
     if claude_marketplace_present; then
-      if "$cli" plugin marketplace remove "$MARKETPLACE_NAME" >/dev/null 2>&1; then
+      if claude_marketplace_cmd remove "$MARKETPLACE_NAME" >/dev/null 2>&1; then
         ok "marketplace '$MARKETPLACE_NAME' removed"
       else
         record_fail "claude" "marketplace removal failed"
@@ -473,6 +717,7 @@ codex_install() {
 
   if codex_skill_installed; then
     ok "skill installed at $(codex_skill_dir)"
+    write_provenance "$(CODEX_PROVENANCE_FILE)" "direct-copy"
   else
     record_fail "codex" "skill missing after install"
     return 1
@@ -501,6 +746,7 @@ codex_update() {
     return 1
   fi
   ok "skill updated at $(codex_skill_dir)"
+  write_provenance "$(CODEX_PROVENANCE_FILE)" "direct-copy"
   record_ok "codex" "updated"
   return 0
 }
@@ -518,6 +764,7 @@ codex_uninstall() {
   else
     ok "skill was not installed (nothing to do)"
   fi
+  remove_provenance "$(CODEX_PROVENANCE_FILE)"
   record_ok "codex" "uninstalled"
   return 0
 }
@@ -569,59 +816,101 @@ repo_head() {
   fi
 }
 
+# Render the shared "where did this install come from / is it current" block.
+#   $1 provenance file, $2 installed payload dir ("" if not discoverable)
+print_version_block() {
+  local prov="$1" payload_dir="$2"
+  local origin sync rev
+
+  origin="$(install_origin "$prov" "$payload_dir")"
+  sync="$(sync_state "$payload_dir")"
+  rev="$(read_provenance_field "$prov" repo_commit 2>/dev/null || echo '')"
+
+  case "$origin" in
+    managed)
+      if [ -n "$rev" ]; then
+        printf '  Installed rev:   %s\n' "${rev:0:7}"
+      else
+        printf '  Installed rev:   unknown\n'
+      fi
+      printf '  Source:          this repo (%s)\n' "$REPO_ROOT" ;;
+    external)
+      local other; other="$(read_provenance_field "$prov" repo_root 2>/dev/null || echo 'unknown')"
+      if [ -n "$rev" ]; then
+        printf '  Installed rev:   %s\n' "${rev:0:7}"
+      else
+        printf '  Installed rev:   unknown\n'
+      fi
+      printf '  Source:          External install (deployed from %s)\n' "${other:-unknown}" ;;
+    *)
+      printf '  Installed rev:   unknown\n'
+      printf '  Source:          External install (not deployed by this tool)\n' ;;
+  esac
+
+  case "$sync" in
+    up-to-date)       printf '  Status:          Up to date\n' ;;
+    update-available) printf '  Status:          Update available\n' ;;
+    *)                printf '  Status:          Unknown\n' ;;
+  esac
+}
+
 cmd_status() {
   local want_claude="$1" want_codex="$2"
 
-  printf '%s%s status%s\n' "$C_BOLD" "$SKILL_NAME" "$C_RESET"
-  printf '  repo:  %s\n' "$REPO_ROOT"
-  printf '  HEAD:  %s\n' "$(repo_head)"
+  printf '%s%s status%s\n\n' "$C_BOLD" "$SKILL_NAME" "$C_RESET"
+
+  printf '%sRepository%s\n' "$C_BOLD" "$C_RESET"
+  printf '  Path:            %s\n' "$REPO_ROOT"
+  printf '  Commit:          %s\n' "$(repo_head)"
+  local rfp; rfp="$(repo_fingerprint 2>/dev/null || echo '')"
+  if [ -n "$rfp" ]; then
+    printf '  Payload:         %s\n' "${rfp:0:12}"
+  else
+    printf '  Payload:         unknown\n'
+  fi
   printf '\n'
 
   if [ "$want_claude" = "yes" ]; then
     printf '%sClaude Code%s\n' "$C_BOLD" "$C_RESET"
     if have_claude; then
-      printf '  CLI:             installed (%s)\n' "$(find_claude_cli)"
-      if claude_plugin_installed; then
+      printf '  CLI:             installed (%s)\n' "$(claude_version_string)"
+      local missing; missing="$(claude_missing_capabilities 2>/dev/null || echo 'plugin-group')"
+      if [ -n "$missing" ]; then
+        printf '  CLI interface:   changed (missing: %s)\n' "$missing"
+        printf '  Plugin:          unknown\n'
+      elif claude_plugin_installed; then
         local v; v="$(claude_plugin_version 2>/dev/null || true)"
         if claude_plugin_enabled; then
           printf '  Plugin:          installed%s\n' "${v:+ ($v)}"
         else
           printf '  Plugin:          installed but disabled%s\n' "${v:+ ($v)}"
         fi
+        print_version_block "$(CLAUDE_PROVENANCE_FILE)" "$(claude_installed_payload_dir 2>/dev/null || echo '')"
       else
         printf '  Plugin:          not installed\n'
       fi
-      if claude_permanent_on; then
-        printf '  Permanent mode:  enabled\n'
-      else
-        printf '  Permanent mode:  disabled\n'
-      fi
-      printf '  Invocation:      /%s\n' "$SKILL_NAME"
     else
       printf '  CLI:             not installed\n'
       printf '  Plugin:          unknown\n'
-      if claude_permanent_on; then
-        printf '  Permanent mode:  enabled (flag file present)\n'
-      else
-        printf '  Permanent mode:  disabled\n'
-      fi
     fi
-    printf '\n'
+    if claude_permanent_on; then
+      printf '  Permanent mode:  enabled\n'
+    else
+      printf '  Permanent mode:  disabled\n'
+    fi
+    printf '  Invocation:      /%s\n\n' "$SKILL_NAME"
   fi
 
   if [ "$want_codex" = "yes" ]; then
     printf '%sCodex%s\n' "$C_BOLD" "$C_RESET"
     if have_codex; then
-      printf '  CLI:             installed (%s)\n' "$(find_codex_cli)"
+      printf '  CLI:             installed (%s)\n' "$(codex_version_string)"
     else
       printf '  CLI:             not installed\n'
     fi
     if codex_skill_installed; then
-      if codex_matches_repo; then
-        printf '  Skill:           installed (matches this repo)\n'
-      else
-        printf '  Skill:           installed (differs from this repo)\n'
-      fi
+      printf '  Skill:           installed\n'
+      print_version_block "$(CODEX_PROVENANCE_FILE)" "$(codex_skill_dir)"
     else
       printf '  Skill:           not installed\n'
     fi
@@ -630,11 +919,44 @@ cmd_status() {
     else
       printf '  Permanent mode:  disabled\n'
     fi
-    printf '  Invocation:      $%s\n' "$SKILL_NAME"
-    printf '\n'
+    printf '  Invocation:      $%s\n\n' "$SKILL_NAME"
   fi
 
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# self-test
+# ---------------------------------------------------------------------------
+
+cmd_self_test() {
+  local runner="$REPO_ROOT/tests/run_all.sh"
+
+  printf 'Running self test...\n\n'
+
+  if [ ! -f "$runner" ]; then
+    err "Repository incomplete: tests/run_all.sh is missing."
+    info "  Expected at: $runner"
+    info "  This copy of the repository does not include its test suite. Re-clone from"
+    info "  https://git.skea.io/S/skills.git (or the GitHub mirror) to get a complete checkout."
+    return 1
+  fi
+  if [ ! -r "$runner" ]; then
+    err "Repository incomplete: tests/run_all.sh is not readable."
+    info "  Expected at: $runner"
+    return 1
+  fi
+
+  local rc=0
+  bash "$runner" || rc=$?
+
+  printf '\n'
+  if [ "$rc" -eq 0 ]; then
+    printf '%sPASS%s\n' "$C_GREEN" "$C_RESET"
+    return 0
+  fi
+  printf '%sFAIL%s (self test exited %s)\n' "$C_RED" "$C_RESET" "$rc"
+  return 1
 }
 
 DOCTOR_FAIL=0
@@ -699,28 +1021,52 @@ cmd_doctor() {
   if [ "$want_claude" = "yes" ]; then
     printf '\n%sClaude Code%s\n' "$C_BOLD" "$C_RESET"
     if have_claude; then
-      local cli ver; cli="$(find_claude_cli)"
-      ver="$("$cli" --version 2>/dev/null | head -1 || true)"
-      d_ok "CLI: $cli ${ver:+($ver)}"
-      if claude_marketplace_present; then d_ok "marketplace '$MARKETPLACE_NAME' configured"
-      else d_info "marketplace '$MARKETPLACE_NAME' not configured"; fi
-      if claude_plugin_installed; then
-        d_ok "plugin installed ($(claude_plugin_version 2>/dev/null || echo '?'))"
-        if claude_plugin_enabled; then d_ok "plugin enabled"
-        else d_warn "plugin installed but disabled"; fi
+      # A version we cannot parse is reported as unknown, never as a failure.
+      d_ok "CLI: $(find_claude_cli) (version: $(claude_version_string))"
+
+      # Capability detection, not version gating: we ask the CLI what it can do.
+      local missing; missing="$(claude_missing_capabilities 2>/dev/null || echo 'plugin-group')"
+      if [ -z "$missing" ]; then
+        d_ok "CLI interface: '$CAP_PLUGIN_GROUP' / '$CAP_MARKETPLACE_GROUP' subcommands available"
       else
-        d_info "plugin not installed"
+        # The CLI exists but we cannot drive it — install genuinely cannot work.
+        d_fail "CLI interface changed: missing $missing"
+        d_info "the installer cannot drive this CLI; install manually per INSTALL.md"
       fi
+
+      if [ -z "$missing" ]; then
+        if claude_marketplace_present; then d_ok "marketplace '$MARKETPLACE_NAME' configured"
+        else d_info "marketplace '$MARKETPLACE_NAME' not configured"; fi
+        if claude_plugin_installed; then
+          d_ok "plugin installed ($(claude_plugin_version 2>/dev/null || echo '?'))"
+          if claude_plugin_enabled; then d_ok "plugin enabled"
+          else d_warn "plugin installed but disabled"; fi
+          local cstate; cstate="$(sync_state "$(claude_installed_payload_dir 2>/dev/null || echo '')")"
+          case "$cstate" in
+            up-to-date)       d_ok   "installed copy matches this repo" ;;
+            update-available) d_warn "installed copy differs from this repo (run: skills.sh update --claude)" ;;
+            *)                d_info "cannot compare installed copy with this repo (unknown)" ;;
+          esac
+        else
+          d_info "plugin not installed"
+        fi
+      fi
+
       if claude_permanent_on; then d_info "permanent mode: enabled"
       else d_info "permanent mode: disabled"; fi
     else
-      d_info "CLI not installed"
+      # Absent CLI is a warning, not a failure: the other platform may be fine.
+      d_warn "CLI not installed"
     fi
   fi
 
   if [ "$want_codex" = "yes" ]; then
     printf '\n%sCodex%s\n' "$C_BOLD" "$C_RESET"
-    if have_codex; then d_ok "CLI: $(find_codex_cli)"; else d_info "CLI not installed"; fi
+    if have_codex; then
+      d_ok "CLI: $(find_codex_cli) (version: $(codex_version_string))"
+    else
+      d_warn "CLI not installed"
+    fi
     if codex_skill_installed; then
       d_ok "skill installed at $(codex_skill_dir)"
       if validate_skill_payload "$(codex_skill_dir)" >/dev/null 2>&1; then
@@ -814,6 +1160,7 @@ ${C_BOLD}COMMANDS${C_RESET}
   disable      Turn off permanent mode (skill stays installed)
   status       Read-only report of what is installed and enabled
   doctor       Read-only diagnostics
+  self-test    Run this repository's full test suite
   help         Show this help
 
 ${C_BOLD}PLATFORM${C_RESET}
@@ -864,7 +1211,7 @@ main() {
 
   case "$1" in
     -h|--help|help) usage; return 0 ;;
-    install|update|uninstall|enable|disable|status|doctor) command="$1"; shift ;;
+    install|update|uninstall|enable|disable|status|doctor|self-test) command="$1"; shift ;;
     -*) err "unknown option: $1"; info "Run 'bash skills.sh help' for usage."; return 2 ;;
     *)  err "unknown command: $1"; info "Run 'bash skills.sh help' for usage."; return 2 ;;
   esac
@@ -912,6 +1259,15 @@ main() {
 
   # ---- resolve target platforms -------------------------------------------
   local want_claude="no" want_codex="no" explicit="no"
+  # self-test validates the repository itself; it has no per-platform variant.
+  if [ "$command" = "self-test" ]; then
+    if [ -n "$platform" ]; then
+      err "self-test does not take a platform option (--$platform)"
+      return 2
+    fi
+    cmd_self_test
+    return "$?"
+  fi
   case "$platform" in
     claude) want_claude="yes"; explicit="yes" ;;
     codex)  want_codex="yes";  explicit="yes" ;;
@@ -1019,6 +1375,7 @@ main() {
       return "$rc" ;;
     status) cmd_status "$want_claude" "$want_codex"; return 0 ;;
     doctor) cmd_doctor "$want_claude" "$want_codex"; return "$?" ;;
+    self-test) cmd_self_test; return "$?" ;;
   esac
 }
 
