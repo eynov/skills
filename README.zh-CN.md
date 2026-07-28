@@ -14,7 +14,7 @@
 > 详见 [NOTICE.md](./NOTICE.md)（英文，含托管关系与 attribution 说明）。
 
 - 权威仓库（Gitea）：`https://git.skea.io/S/skills`
-- 本地长期工作树：`/opt/skills`
+- 本地长期工作树：`/opt/work/skills`
 - 上游参考项目：[ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)（仅作参考，不 push）
 
 ## 这个仓库里有什么

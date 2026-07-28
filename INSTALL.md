@@ -38,7 +38,12 @@ Look for `Status: ✔ enabled` (marketplace install) or `Status: ✔ loaded` (sk
 
 ```bash
 claude plugin marketplace update skills
+claude plugin update i-have-work@skills
 ```
+
+Both steps are required: `marketplace update` refreshes the catalog, `plugin update` actually
+re-installs the plugin from it (restart Claude Code to apply). Note the `@skills` suffix on
+`plugin update` — without it, Claude Code reports "Plugin not found".
 
 Skills-dir install: `git -C /tmp/skills pull && cp -R /tmp/skills/plugins/i-have-work ~/.claude/skills/i-have-work`.
 
@@ -130,7 +135,7 @@ first).
 Plugin route:
 
 ```bash
-codex plugin marketplace update skills
+codex plugin marketplace upgrade skills
 codex plugin remove i-have-work
 codex plugin add i-have-work@skills
 ```
