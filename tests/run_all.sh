@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Runs every check for this repo: shellcheck over all shell scripts, JSON/
+# manifest validation, and the i-have-work enable/disable behavioral tests.
+# Exits non-zero if anything fails.
+set -uo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+fail=0
+
+echo "########## shellcheck ##########"
+if command -v shellcheck >/dev/null 2>&1; then
+  while IFS= read -r -d '' f; do
+    first_line="$(head -n1 "$f")"
+    case "$first_line" in
+      *bash) dialect="bash" ;;
+      *) dialect="sh" ;;
+    esac
+    if shellcheck -s "$dialect" "$f"; then
+      echo "OK   $f"
+    else
+      fail=1
+    fi
+  done < <(find "$repo_root" \( -name "*.sh" \) -not -path "*/.git/*" -print0)
+else
+  echo "SKIP shellcheck not installed"
+fi
+
+echo
+echo "########## manifests ##########"
+bash "$repo_root/tests/test_manifests.sh" || fail=1
+
+echo
+echo "########## claude always-on hook ##########"
+bash "$repo_root/tests/test_claude_hook.sh" || fail=1
+
+echo
+echo "########## codex AGENTS.md toggle ##########"
+bash "$repo_root/tests/test_codex_agents_toggle.sh" || fail=1
+
+echo
+if [ "$fail" -eq 0 ]; then
+  echo "ALL CHECKS PASSED"
+else
+  echo "SOME CHECKS FAILED"
+fi
+exit "$fail"

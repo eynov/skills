@@ -1,0 +1,11 @@
+{
+  "name": "i-have-work",
+  "version": "0.1.0",
+  "description": "Work like a careful senior production engineer: confirm the authoritative source, find root cause, change the minimum, verify for real, clean up, report honestly.",
+  "author": {
+    "name": "eynov"
+  },
+  "homepage": "https://git.skea.io/S/skills",
+  "repository": "https://git.skea.io/S/skills.git",
+  "license": "MIT"
+}

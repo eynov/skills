@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "skills",
+  "description": "eynov's Agent Skills for Claude Code and Codex.",
+  "owner": {
+    "name": "eynov"
+  },
+  "plugins": [
+    {
+      "name": "i-have-work",
+      "description": "Work like a careful senior production engineer: confirm the authoritative source, find root cause, change the minimum, verify for real, clean up, report honestly.",
+      "source": "./plugins/i-have-work",
+      "category": "productivity"
+    }
+  ]
+}

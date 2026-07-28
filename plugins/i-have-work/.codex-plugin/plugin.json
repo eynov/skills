@@ -1,0 +1,36 @@
+{
+  "name": "i-have-work",
+  "version": "0.1.0",
+  "description": "Engineering-discipline output and workflow for Codex: confirm the authoritative source, find root cause, change the minimum, verify for real, clean up, report honestly.",
+  "author": {
+    "name": "eynov"
+  },
+  "homepage": "https://git.skea.io/S/skills",
+  "repository": "https://git.skea.io/S/skills.git",
+  "license": "MIT",
+  "keywords": [
+    "engineering-discipline",
+    "ops",
+    "reliability",
+    "workflow",
+    "skills"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "I Have Work",
+    "shortDescription": "Careful, verified, closed-loop engineering discipline",
+    "longDescription": "Shapes Codex into a cautious senior engineer: confirm the authoritative config source before editing, find root cause instead of papering over symptoms, change the minimum and keep it reversible, verify with real execution instead of trusting exit codes, clean up temporary artifacts, and close every task with an auditable report.",
+    "developerName": "eynov",
+    "category": "Productivity",
+    "capabilities": [
+      "Instructions"
+    ],
+    "websiteURL": "https://git.skea.io/S/skills",
+    "defaultPrompt": [
+      "Use i-have-work for this task.",
+      "Investigate root cause before changing anything.",
+      "Give me the Final Review Pack for this task."
+    ],
+    "brandColor": "#0F766E"
+  }
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "I Have Work"
+  short_description: "Careful, verified, closed-loop engineering discipline"
+  default_prompt: "Use $i-have-work for this task: confirm the authoritative source, find root cause, change the minimum, verify for real, and close with a Final Review Pack."
+
+policy:
+  allow_implicit_invocation: true
