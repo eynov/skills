@@ -30,6 +30,10 @@ echo "########## manifests ##########"
 bash "$repo_root/tests/test_manifests.sh" || fail=1
 
 echo
+echo "########## opt-in invariant ##########"
+bash "$repo_root/tests/test_opt_in_invariant.sh" || fail=1
+
+echo
 echo "########## claude always-on hook ##########"
 bash "$repo_root/tests/test_claude_hook.sh" || fail=1
 

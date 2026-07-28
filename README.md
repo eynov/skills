@@ -10,8 +10,11 @@
   <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-> **Gitea is the authoritative source. GitHub, if configured, is a read-only public mirror
-> only.** See [NOTICE.md](./NOTICE.md) for hosting and attribution details.
+> **Gitea is the authoritative source. GitHub is a read-only public mirror.**
+> Development happens on [`git.skea.io/S/skills`](https://git.skea.io/S/skills);
+> [`github.com/eynov/skills`](https://github.com/eynov/skills) is kept in sync by a Gitea push
+> mirror and any change pushed there directly will be overwritten. See
+> [NOTICE.md](./NOTICE.md) for hosting and attribution details.
 
 ## Install
 

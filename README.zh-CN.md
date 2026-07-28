@@ -10,7 +10,10 @@
   <strong>简体中文</strong>
 </p>
 
-> **Gitea 是唯一权威源，GitHub（如已配置）仅作为公开只读镜像。**
+> **Gitea 是唯一权威源，GitHub 仅作为公开只读镜像。**
+> 所有开发、提交、Tag 与发布都在 [`git.skea.io/S/skills`](https://git.skea.io/S/skills) 进行；
+> [`github.com/eynov/skills`](https://github.com/eynov/skills) 由 Gitea Push Mirror 自动同步，
+> 直接推送到 GitHub 的改动会在下次同步时被覆盖。
 > 详见 [NOTICE.md](./NOTICE.md)（英文，含托管关系与 attribution 说明）。
 
 - 权威仓库（Gitea）：`https://git.skea.io/S/skills`
@@ -136,13 +139,27 @@ sh /tmp/skills/plugins/i-have-work/scripts/codex-disable-always.sh
 rm -rf ~/.codex/skills/i-have-work
 ```
 
-**关于 Codex 的插件/市场方式：** 本仓库同时提供了 `.codex-plugin/plugin.json` 与
-`.agents/plugins/marketplace.json`，理论上可以用
-`codex plugin marketplace add https://git.skea.io/S/skills.git --ref main` +
-`codex plugin add i-have-work@skills` 安装。**但这条路径在实现本项目时未能用真实的
-`codex` 命令行验证**（构建环境里没有 `codex` 可执行文件），仅依据 Codex 自带的
-`plugin-creator`/`skill-installer` 系统 Skill 文档整理而来。上面“直接复制”的方式已经
-对照 Codex 真实的 `skill-installer` 目标目录结构核实过，请优先使用。
+**关于 Codex 的插件/市场方式（已知限制，请优先使用上面的直接复制）：**
+
+本仓库同时提供了 `.codex-plugin/plugin.json` 与 `.agents/plugins/marketplace.json`，
+理论上可以用 `codex plugin marketplace add https://git.skea.io/S/skills.git --ref main` +
+`codex plugin add i-have-work@skills` 安装。但存在两点必须说明：
+
+1. **这条路径当前无法通过 Codex 自带的插件校验。** 用 Codex 自带的
+   `plugin-creator/scripts/validate_plugin.py` 实际校验本插件会失败，报错为：
+   `skill i-have-work frontmatter field disable-model-invocation must be false`。
+   这个字段是**故意**设为 `true` 的——它是 Claude Code 用来保证「不显式调用就绝不生效」
+   的机制，属于本项目的核心设计要求。Codex 侧的等价开关是
+   `agents/openai.yaml` 里的 `policy.allow_implicit_invocation: false`，本 Skill 同样已设置。
+   两个平台对该字段的要求互相冲突，本项目选择优先保证 Claude Code 的「按需生效」承诺。
+   如果你确实需要走插件路径，可以在自己的副本里删掉 `disable-model-invocation` 这一行，
+   但要清楚：这样一来，同一份副本装到 Claude Code 时就可能被自动调用。
+2. **该路径未经真实 `codex` 命令行验证**（构建环境里没有 `codex` 可执行文件），
+   命令写法仅依据 Codex 自带的 `plugin-creator`/`skill-installer` 系统 Skill 文档整理而来，
+   属于 **structurally verified only（仅结构性核实）**。
+
+上面「直接复制」的方式不经过插件校验，不受此限制影响，且已对照 Codex 真实的
+`skill-installer` 目标目录结构核实过，请优先使用。
 
 ## 与 `i-have-adhd` 的关系
 

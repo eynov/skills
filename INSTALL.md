@@ -1,7 +1,8 @@
 # Install i-have-work
 
-Authoritative source: `https://git.skea.io/S/skills` (Gitea). GitHub, if configured, is a
-read-only mirror only — see [NOTICE.md](./NOTICE.md).
+Authoritative source: `https://git.skea.io/S/skills` (Gitea).
+[`github.com/eynov/skills`](https://github.com/eynov/skills) is a read-only mirror — see
+[NOTICE.md](./NOTICE.md).
 
 <details open>
 <summary><strong>Claude Code</strong></summary>
@@ -92,11 +93,9 @@ are documented below; the direct copy is the simplest and requires no Codex plug
 git clone https://git.skea.io/S/skills.git /tmp/skills
 mkdir -p ~/.codex/skills
 cp -R /tmp/skills/plugins/i-have-work/skills/i-have-work ~/.codex/skills/i-have-work
-cp -R /tmp/skills/plugins/i-have-work/skills/i-have-work/agents ~/.codex/skills/i-have-work/agents 2>/dev/null || true
 ```
 
-(The `agents/openai.yaml` file travels with the skill folder already; the second line is a
-no-op safety net if you copy files individually instead of the whole directory.)
+That copies `SKILL.md` and `agents/openai.yaml` together, which is everything Codex needs.
 
 Start a new Codex session, type `$i-have-work`.
 
@@ -107,18 +106,34 @@ codex plugin marketplace add https://git.skea.io/S/skills.git --ref main
 codex plugin add i-have-work@skills
 ```
 
-Type `$i-have-work` to apply it explicitly. Codex also allows implicit invocation
-(`policy.allow_implicit_invocation: true` in `agents/openai.yaml`), so Codex may apply it on
-its own when it judges a task calls for this discipline.
+Type `$i-have-work` to apply it explicitly.
+
+> **Known limitation — this route currently fails Codex's plugin validation.** Codex's own
+> bundled validator (`plugin-creator/scripts/validate_plugin.py`, which its docs describe as
+> mirroring the workspace plugin ingestion schema) rejects this plugin with:
+>
+> ```
+> skill `i-have-work` frontmatter field `disable-model-invocation` must be false
+> ```
+>
+> That field is deliberately `true`, because it is Claude Code's mechanism for guaranteeing
+> the skill never activates until you invoke it — a core design requirement here. Codex
+> expresses the same intent through `policy.allow_implicit_invocation: false` in
+> `agents/openai.yaml`, which this skill also sets. The two platforms simply disagree about
+> the field, and Claude Code's guarantee wins.
+>
+> **Use the direct-copy route above for Codex.** It bypasses plugin ingestion entirely and is
+> unaffected. If you specifically need the plugin route, delete the
+> `disable-model-invocation` line from your local copy of `SKILL.md` — but understand that
+> doing so lets Claude Code auto-invoke the skill if you install the same copy there.
 
 > **Verification note:** the `codex` CLI was not present on the machine this repo was built
 > and tested on, so the `codex plugin ...` command syntax above is taken from Codex's own
 > bundled `plugin-creator`/`skill-installer` reference docs and from upstream's
-> (`i-have-adhd`) documented usage, not from a live end-to-end run. The direct-copy method
-> above **was** verified structurally against Codex's real, currently-installed
+> (`i-have-adhd`) documented usage — **structurally verified only, never executed live.** The
+> direct-copy method above was verified structurally against Codex's real, currently-installed
 > `skill-installer` skill, which confirms `$CODEX_HOME/skills/<name>/SKILL.md` as the actual
-> install target. Treat the plugin/marketplace route as documented-but-unexecuted until you
-> confirm it on a machine with `codex` on `PATH`.
+> install target.
 
 ### Verify
 
@@ -179,11 +194,11 @@ block is already present; the disable script is a no-op if it's already absent).
 
 ## How activation works
 
-1. **Installed, not invoked.** `SKILL.md` sets `disable-model-invocation: true` for Claude
-   Code, so nothing changes until you invoke it. Codex ships with implicit invocation allowed
-   by default (see `agents/openai.yaml`), so it may apply the skill on its own when relevant —
-   turn that off by editing `policy.allow_implicit_invocation` to `false` in your local copy if
-   you don't want that.
+1. **Installed, not invoked.** Nothing changes until you invoke it, on either platform.
+   `SKILL.md` sets `disable-model-invocation: true` (Claude Code's control) and
+   `agents/openai.yaml` sets `policy.allow_implicit_invocation: false` (Codex's equivalent).
+   Flip the `openai.yaml` value to `true` in your local copy if you *want* Codex to apply this
+   discipline on its own.
 2. **You type `/i-have-work`** (Claude Code) **or `$i-have-work`** (Codex). Rules apply for
    that session. Say "stop work mode" or "normal mode" to turn them off again.
 3. **You touch `~/.claude/.i-have-work-always`** (Claude Code) or **run

@@ -38,7 +38,9 @@ Both the reused architecture and the original content are distributed under the 
 ## Hosting
 
 - **Gitea** (`https://git.skea.io/S/skills`) is the authoritative source for this repository.
-- **GitHub** (`eynov/skills`, once configured) is a read-only public mirror only.
+- **GitHub** ([`eynov/skills`](https://github.com/eynov/skills)) is a read-only public mirror,
+  kept in sync by a Gitea push mirror. Do not commit or open PRs there — changes made on
+  GitHub are overwritten on the next sync.
 - `upstream` (`https://github.com/ayghri/i-have-adhd.git`) is kept as a git remote for
   reference only — nothing is pushed to it, and it is not this project's origin.
 

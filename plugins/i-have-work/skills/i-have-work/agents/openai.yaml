@@ -4,4 +4,8 @@ interface:
   default_prompt: "Use $i-have-work for this task: confirm the authoritative source, find root cause, change the minimum, verify for real, and close with a Final Review Pack."
 
 policy:
-  allow_implicit_invocation: true
+  # Opt-in only, matching `disable-model-invocation: true` in SKILL.md (Claude
+  # Code's equivalent control). The skill must never change agent behavior
+  # until it is explicitly invoked with $i-have-work or turned on permanently.
+  # Set to true if you instead want Codex to apply this discipline on its own.
+  allow_implicit_invocation: false
