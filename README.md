@@ -18,32 +18,79 @@
 
 ## Install
 
-<details>
-<summary><strong>Claude Code</strong></summary>
+From GitHub:
 
 ```bash
-claude plugin marketplace add https://git.skea.io/S/skills.git
-claude plugin install i-have-work@skills
+git clone https://github.com/eynov/skills.git
+cd skills
+bash install.sh
 ```
 
-Then type `/i-have-work`. Want it on every session? `touch ~/.claude/.i-have-work-always`
-(see [INSTALL.md](./INSTALL.md)).
-
-</details>
-
-<details>
-<summary><strong>Codex</strong></summary>
+From Gitea:
 
 ```bash
-git clone https://git.skea.io/S/skills.git /tmp/skills
-mkdir -p ~/.codex/skills
-cp -R /tmp/skills/plugins/i-have-work/skills/i-have-work ~/.codex/skills/i-have-work
+git clone https://git.skea.io/S/skills.git
+cd skills
+bash install.sh
 ```
 
-Then type `$i-have-work`. Full details, including the plugin/marketplace route and the
-always-on `AGENTS.md` script, in [INSTALL.md](./INSTALL.md).
+That's it. The installer detects which agents you have (Claude Code, Codex, or both) and
+installs the skill for each. It never installs a CLI for you, and it never turns anything on
+permanently unless you ask.
 
-</details>
+Then invoke it once, in a new session:
+
+| Agent | Invoke |
+|---|---|
+| Claude Code | `/i-have-work` |
+| Codex | `$i-have-work` |
+
+## Managing it
+
+`skills.sh` is the single entry point for everything. (`install.sh` is just a shorthand for
+`skills.sh install`.)
+
+```bash
+bash skills.sh install      # install for detected agents
+bash skills.sh update       # redeploy this repo's version
+bash skills.sh status       # what's installed and enabled
+bash skills.sh doctor       # diagnostics
+bash skills.sh enable       # turn on permanent mode
+bash skills.sh disable      # turn off permanent mode
+bash skills.sh uninstall    # remove the skill
+bash skills.sh help         # full usage
+```
+
+Every command accepts `--claude`, `--codex`, or `--all` to target one or both agents. Omit it
+and the tool auto-detects — but a platform you name explicitly is never silently skipped.
+
+Useful variations:
+
+```bash
+bash skills.sh install --all --permanent      # install and turn on for every session
+bash skills.sh install --all --no-permanent   # install, stay on-demand (the default)
+bash skills.sh install --source github        # force the mirror as the plugin source
+bash skills.sh uninstall --claude --remove-marketplace
+```
+
+Everything is idempotent — running any command twice is safe.
+
+## On-demand by default
+
+Installing changes nothing on its own. The skill stays inert until you invoke it, on both
+agents:
+
+- **Claude Code** — `SKILL.md` sets `disable-model-invocation: true`
+- **Codex** — `agents/openai.yaml` sets `policy.allow_implicit_invocation: false`
+
+**Permanent mode** is a separate, explicit choice. Turn it on with `bash skills.sh enable` (or
+`--permanent` at install time) and the ruleset applies from the first message of every new
+session. `bash skills.sh disable` turns it back off without uninstalling anything. Within a
+single session you can also just say "stop work mode".
+
+If you run `install` in an interactive terminal without `--permanent` or `--no-permanent`,
+you'll be asked once. The default answer is **No**. In a script or CI, it's never asked and
+never enabled.
 
 ## What's in this repo
 
@@ -51,11 +98,11 @@ always-on `AGENTS.md` script, in [INSTALL.md](./INSTALL.md).
 |---|---|
 | [`i-have-work`](plugins/i-have-work/skills/i-have-work/SKILL.md) | Careful, closed-loop production-engineer discipline: confirm the authoritative source, root-cause first, minimal reversible changes, real verification, clean teardown, honest reporting. |
 
-More skills may be added to this repo over time under `plugins/<name>/`.
+More skills may be added over time under `plugins/<name>/`.
 
 ## What `i-have-work` changes
 
-It does not grant new tools or permissions. It changes execution discipline:
+It grants no new tools or permissions. It changes execution discipline:
 
 1. Establish the task boundary and the authoritative source before touching anything.
 2. Investigate root cause before changing anything.
@@ -66,6 +113,24 @@ It does not grant new tools or permissions. It changes execution discipline:
 7. Close with an honest, auditable Final Review Pack — unverified stays labeled unverified.
 
 Full ruleset: [`SKILL.md`](plugins/i-have-work/skills/i-have-work/SKILL.md).
+
+## Notes and limitations
+
+- **`update` deploys what is in this repository.** It deliberately never runs `git pull`, so
+  it works from a Gitea clone, a GitHub clone, a ZIP export, or a read-only mount. To get newer
+  content, update the repo yourself first, then run `bash skills.sh update`.
+- **Codex uses the direct-copy route**, not the plugin/marketplace route. Codex's plugin
+  validator rejects `disable-model-invocation: true`, which is Claude Code's opt-in guarantee
+  and stays. This is a documented cross-platform conflict — details in
+  [INSTALL.md](./INSTALL.md).
+- **Codex is only partially verified.** Installation was exercised against the real `codex`
+  CLI (0.145.0): standalone-path detection works, and the deployed skill lands where `codex
+  doctor` expects it. What has *not* been observed is `$i-have-work` actually firing inside a
+  live Codex session, since that needs authentication. Claude Code, by contrast, is verified
+  end-to-end against the real CLI.
+
+Full install, verification, update and uninstall detail for both agents:
+[INSTALL.md](./INSTALL.md).
 
 ## Relationship to `i-have-adhd`
 

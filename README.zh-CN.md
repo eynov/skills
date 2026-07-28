@@ -16,9 +16,79 @@
 > 直接推送到 GitHub 的改动会在下次同步时被覆盖。
 > 详见 [NOTICE.md](./NOTICE.md)（英文，含托管关系与 attribution 说明）。
 
-- 权威仓库（Gitea）：`https://git.skea.io/S/skills`
-- 本地长期工作树：`/opt/work/skills`
-- 上游参考项目：[ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)（仅作参考，不 push）
+## 安装
+
+从 GitHub 安装：
+
+```bash
+git clone https://github.com/eynov/skills.git
+cd skills
+bash install.sh
+```
+
+从 Gitea 安装：
+
+```bash
+git clone https://git.skea.io/S/skills.git
+cd skills
+bash install.sh
+```
+
+就这么简单。安装器会自动检测你装了哪些 Agent（Claude Code、Codex，或两者），并分别安装。
+它不会替你安装任何 CLI，也不会在你没要求的情况下开启永久模式。
+
+然后新开一个会话，调用一次：
+
+| Agent | 调用方式 |
+|---|---|
+| Claude Code | `/i-have-work` |
+| Codex | `$i-have-work` |
+
+## 日常管理
+
+`skills.sh` 是唯一入口，所有操作都通过它完成。（`install.sh` 只是 `skills.sh install` 的快捷方式。）
+
+```bash
+bash skills.sh install      # 为检测到的 Agent 安装
+bash skills.sh update       # 用当前仓库的版本重新部署
+bash skills.sh status       # 查看安装与启用状态
+bash skills.sh doctor       # 诊断
+bash skills.sh enable       # 开启永久模式
+bash skills.sh disable      # 关闭永久模式
+bash skills.sh uninstall    # 卸载
+bash skills.sh help         # 完整用法
+```
+
+所有命令都支持 `--claude`、`--codex`、`--all` 来指定目标平台。
+不写平台参数时自动检测；但**显式指定的平台绝不会被静默跳过**（找不到就明确报错）。
+
+常用组合：
+
+```bash
+bash skills.sh install --all --permanent      # 安装并开启永久模式
+bash skills.sh install --all --no-permanent   # 安装但保持按需调用（默认）
+bash skills.sh install --source github        # 强制用 GitHub 镜像作为插件源
+bash skills.sh uninstall --claude --remove-marketplace
+```
+
+所有操作都是幂等的，重复执行安全。
+
+## 默认按需启用（opt-in）
+
+**安装本身不会改变 Agent 的任何行为。** 在你主动调用之前，Skill 始终处于未激活状态，
+两个平台都是如此：
+
+- **Claude Code** — `SKILL.md` 中 `disable-model-invocation: true`
+- **Codex** — `agents/openai.yaml` 中 `policy.allow_implicit_invocation: false`
+
+**永久模式是一个独立的、需要你主动做出的选择。**
+用 `bash skills.sh enable`（或安装时加 `--permanent`）开启后，每个新会话从第一条消息起自动生效。
+用 `bash skills.sh disable` 关闭，Skill 本身仍然保持安装状态，不会被卸载。
+如果只想在当前会话临时关闭，直接对 Agent 说「stop work mode」即可。
+
+如果你在**交互式终端**里执行 `install` 且没写 `--permanent` / `--no-permanent`，
+会询问你一次，**默认答案是 No**。
+在脚本或 CI 等非交互环境中，不会询问、不会卡住等待输入，也不会开启永久模式。
 
 ## 这个仓库里有什么
 
@@ -42,124 +112,24 @@
 
 完整规则见 [`SKILL.md`](plugins/i-have-work/skills/i-have-work/SKILL.md)（英文原文，是 Agent 实际读取执行的内容）。
 
-## 安装与使用
+## 说明与已知限制
 
-### Claude Code
+- **`update` 部署的是当前仓库里的内容，不会自动拉取远程更新。**
+  这是有意设计：仓库可能来自 Gitea clone、GitHub clone、ZIP 解压包，或只读挂载。
+  想获取新版本，请你自己先更新仓库（例如 `git pull`），再执行 `bash skills.sh update`。
+- **Codex 使用「直接复制」路线，不使用 plugin/marketplace 路线。**
+  因为 Codex 的插件校验器会拒绝 `disable-model-invocation: true`，
+  而这个字段正是 Claude Code 用来保证「不调用就不生效」的机制，必须保留。
+  这是一个已知并已记录的跨平台字段冲突，详见 [INSTALL.md](./INSTALL.md)。
+- **Codex 侧属于「部分验证」。**
+  安装流程已用**真实的 `codex` CLI（0.145.0）**验证过：能正确识别不在 `PATH` 中的
+  standalone 安装路径，部署后的 Skill 目录也确实位于真实 `codex doctor` 读取的
+  `CODEX_HOME` 位置。
+  **尚未验证的是**：在真实 Codex 会话中 `$i-have-work` 实际被加载并生效的运行时行为——
+  这需要登录认证，不在自动化测试范围内。
+  Claude Code 侧则已用真实 CLI 做过完整的端到端验证。
 
-**安装（Marketplace 方式）：**
-
-```bash
-claude plugin marketplace add https://git.skea.io/S/skills.git
-claude plugin install i-have-work@skills
-```
-
-**当前会话手动启用：** 输入 `/i-have-work`。
-
-**验证安装：**
-
-```bash
-claude plugin list
-```
-
-应看到 `i-have-work@skills` 状态为 `✔ enabled`。
-
-**永久启用（每次新会话自动生效）：**
-
-```bash
-touch ~/.claude/.i-have-work-always
-```
-
-原理：插件自带一个 `SessionStart` 钩子，只有在这个标记文件存在时才会在会话开始时注入完整规则；不加这个文件，装了插件也不会自动改变行为。
-
-**取消永久启用：**
-
-```bash
-rm ~/.claude/.i-have-work-always
-```
-
-**当前会话临时关闭：** 直接对 Claude 说“stop work mode”（或“normal mode”），只影响本次会话，不影响永久启用标记。
-
-**卸载：**
-
-```bash
-claude plugin uninstall i-have-work
-claude plugin marketplace remove skills
-```
-
-**不想用 marketplace？** 也可以直接把插件目录复制进个人 Skills 目录，无需 marketplace：
-
-```bash
-git clone https://git.skea.io/S/skills.git /tmp/skills
-cp -R /tmp/skills/plugins/i-have-work ~/.claude/skills/i-have-work
-```
-
-下次会话会自动加载为 `i-have-work@skills-dir`；当前会话执行 `/reload-plugins` 可立即加载。
-
-### Codex
-
-Codex 会从 `$CODEX_HOME/skills/<name>/SKILL.md`（默认 `~/.codex/skills`）读取 Skill，这是本机上经过核实的真实机制。
-
-**安装（推荐，直接复制）：**
-
-```bash
-git clone https://git.skea.io/S/skills.git /tmp/skills
-mkdir -p ~/.codex/skills
-cp -R /tmp/skills/plugins/i-have-work/skills/i-have-work ~/.codex/skills/i-have-work
-```
-
-**当前会话手动启用：** 新开一个 Codex 会话，输入 `$i-have-work`。
-
-**验证安装：**
-
-```bash
-ls ~/.codex/skills
-```
-
-能看到 `i-have-work` 目录即为安装成功。
-
-**永久启用（每次新会话自动生效）：**
-
-```bash
-sh /tmp/skills/plugins/i-have-work/scripts/codex-enable-always.sh
-```
-
-原理：这个脚本会在 `~/.codex/AGENTS.md` 中追加一段**有明确起止标记、可安全重复执行**的规则块；如果你已经有自己的 `AGENTS.md` 内容，脚本只会追加，不会修改或覆盖原有内容。Codex 每次会话都会读取 `AGENTS.md`，因此这段规则会自动生效。
-
-**取消永久启用：**
-
-```bash
-sh /tmp/skills/plugins/i-have-work/scripts/codex-disable-always.sh
-```
-
-这个脚本只会删除它自己添加的那一段（由起止标记界定），不会动你 `AGENTS.md` 里的其他内容。
-
-**卸载：**
-
-```bash
-rm -rf ~/.codex/skills/i-have-work
-```
-
-**关于 Codex 的插件/市场方式（已知限制，请优先使用上面的直接复制）：**
-
-本仓库同时提供了 `.codex-plugin/plugin.json` 与 `.agents/plugins/marketplace.json`，
-理论上可以用 `codex plugin marketplace add https://git.skea.io/S/skills.git --ref main` +
-`codex plugin add i-have-work@skills` 安装。但存在两点必须说明：
-
-1. **这条路径当前无法通过 Codex 自带的插件校验。** 用 Codex 自带的
-   `plugin-creator/scripts/validate_plugin.py` 实际校验本插件会失败，报错为：
-   `skill i-have-work frontmatter field disable-model-invocation must be false`。
-   这个字段是**故意**设为 `true` 的——它是 Claude Code 用来保证「不显式调用就绝不生效」
-   的机制，属于本项目的核心设计要求。Codex 侧的等价开关是
-   `agents/openai.yaml` 里的 `policy.allow_implicit_invocation: false`，本 Skill 同样已设置。
-   两个平台对该字段的要求互相冲突，本项目选择优先保证 Claude Code 的「按需生效」承诺。
-   如果你确实需要走插件路径，可以在自己的副本里删掉 `disable-model-invocation` 这一行，
-   但要清楚：这样一来，同一份副本装到 Claude Code 时就可能被自动调用。
-2. **该路径未经真实 `codex` 命令行验证**（构建环境里没有 `codex` 可执行文件），
-   命令写法仅依据 Codex 自带的 `plugin-creator`/`skill-installer` 系统 Skill 文档整理而来，
-   属于 **structurally verified only（仅结构性核实）**。
-
-上面「直接复制」的方式不经过插件校验，不受此限制影响，且已对照 Codex 真实的
-`skill-installer` 目标目录结构核实过，请优先使用。
+两个平台完整的安装、验证、更新与卸载说明见 [INSTALL.md](./INSTALL.md)。
 
 ## 与 `i-have-adhd` 的关系
 

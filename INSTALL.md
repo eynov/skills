@@ -4,6 +4,41 @@ Authoritative source: `https://git.skea.io/S/skills` (Gitea).
 [`github.com/eynov/skills`](https://github.com/eynov/skills) is a read-only mirror — see
 [NOTICE.md](./NOTICE.md).
 
+## Recommended: the managed installer
+
+```bash
+git clone https://github.com/eynov/skills.git    # or https://git.skea.io/S/skills.git
+cd skills
+bash install.sh
+```
+
+`install.sh` is a shorthand for `skills.sh install`. It detects Claude Code and Codex, installs
+for whichever it finds, and leaves the skill on-demand unless you ask otherwise.
+
+```bash
+bash skills.sh install      bash skills.sh status     bash skills.sh enable
+bash skills.sh update       bash skills.sh doctor     bash skills.sh disable
+bash skills.sh uninstall    bash skills.sh help
+```
+
+Add `--claude`, `--codex`, or `--all` to target specific agents; `--permanent` /
+`--no-permanent` to control permanent mode; `--source auto|gitea|github` to choose the
+Claude Code plugin source. Run `bash skills.sh help` for the full reference.
+
+**Source selection.** With `--source auto` (the default) the installer prefers whichever host
+this clone came from and falls back to the other if it is unreachable. Forcing
+`--source gitea` or `--source github` disables that fallback — if the forced host is down, the
+install fails loudly rather than quietly using the other one.
+
+**`update` scope.** `skills.sh update` redeploys the copy in this repository. It never runs
+`git pull`, so it works from a Gitea clone, a GitHub clone, a ZIP export, or a read-only
+mount. Update the repository yourself first if you want newer content.
+
+The rest of this document covers the manual routes, which remain fully supported if you prefer
+to drive the agent CLIs yourself.
+
+## Manual installation
+
 <details open>
 <summary><strong>Claude Code</strong></summary>
 
@@ -127,13 +162,12 @@ Type `$i-have-work` to apply it explicitly.
 > `disable-model-invocation` line from your local copy of `SKILL.md` — but understand that
 > doing so lets Claude Code auto-invoke the skill if you install the same copy there.
 
-> **Verification note:** the `codex` CLI was not present on the machine this repo was built
-> and tested on, so the `codex plugin ...` command syntax above is taken from Codex's own
+> **Verification note:** the `codex plugin ...` command syntax above is taken from Codex's own
 > bundled `plugin-creator`/`skill-installer` reference docs and from upstream's
-> (`i-have-adhd`) documented usage — **structurally verified only, never executed live.** The
-> direct-copy method above was verified structurally against Codex's real, currently-installed
-> `skill-installer` skill, which confirms `$CODEX_HOME/skills/<name>/SKILL.md` as the actual
-> install target.
+> (`i-have-adhd`) documented usage. It was **never executed live**, because this route fails
+> Codex's plugin validation anyway (see above). The direct-copy route is the supported one and
+> has been exercised against the real `codex` CLI — see
+> [What is actually verified](#what-is-actually-verified).
 
 ### Verify
 
@@ -201,11 +235,52 @@ block is already present; the disable script is a no-op if it's already absent).
    discipline on its own.
 2. **You type `/i-have-work`** (Claude Code) **or `$i-have-work`** (Codex). Rules apply for
    that session. Say "stop work mode" or "normal mode" to turn them off again.
-3. **You touch `~/.claude/.i-have-work-always`** (Claude Code) or **run
-   `codex-enable-always.sh`** (Codex). Rules apply from message one, every session, until you
-   explicitly turn it back off.
+3. **You turn on permanent mode** — `bash skills.sh enable`, or `--permanent` at install time,
+   or manually via `~/.claude/.i-have-work-always` / `codex-enable-always.sh`. Rules apply from
+   message one, every session, until you explicitly turn it back off.
 
 In Claude Code, no middle ground: if you didn't turn it on, it's off.
+
+## What is actually verified
+
+Being precise about this, because "it should work" is not verification:
+
+**Verified live, against the real CLI:**
+
+- Claude Code marketplace add / install / list / enable / disable / update / uninstall /
+  marketplace remove, including installing from the live Gitea URL.
+- `claude plugin validate` on both the plugin and marketplace manifests.
+- The `SessionStart` always-on hook: silent without the flag file, emits the ruleset with it,
+  silent again after removal.
+- The Codex `AGENTS.md` enable/disable scripts: idempotent, preserve pre-existing user
+  content, remove only their own managed block.
+
+**Verified by automated test with mocked CLIs, in a fully isolated sandbox:**
+
+- The whole `skills.sh` lifecycle: install, update, enable, disable, uninstall, status,
+  doctor; idempotency; argument validation and conflicts; platform auto-detection and explicit
+  selection; source selection and fallback; the interactive prompt (using a real pty, defaulting
+  to No); Codex atomic replace with rollback and no leftover staging/backup directories; not
+  touching other skills, other plugins, or `auth.json`; and paths containing spaces.
+- Tests run with `HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `PATH` all redirected into a
+  temporary sandbox, so they never read or modify a real `~/.claude` or `~/.codex`.
+
+**Partially verified against the real Codex CLI (codex-cli 0.145.0):**
+
+- The CLI is detected correctly when installed as a standalone outside `PATH`
+  (`~/.local/bin/codex` → `~/.codex/packages/standalone/...`).
+- `skills.sh install --codex` deploys `SKILL.md` and `agents/openai.yaml` into
+  `$CODEX_HOME/skills/i-have-work/`, and the real `codex doctor` reads that same `CODEX_HOME`
+  without complaint.
+
+**Not verified live:**
+
+- **Actual `$i-have-work` invocation inside a Codex session.** Driving a real Codex session
+  requires authentication, which is out of scope for an automated test suite, so the skill's
+  runtime behavior in Codex is unconfirmed. The install layout is correct and the CLI accepts
+  it; what has not been observed is Codex loading and applying the skill in a live session.
+- **The Codex plugin/marketplace route**, which is rejected by Codex's plugin validator (see
+  the known-limitation note above). The direct-copy route used by `skills.sh` is unaffected.
 
 ## Troubleshooting
 

@@ -15,7 +15,9 @@ if command -v shellcheck >/dev/null 2>&1; then
       *bash) dialect="bash" ;;
       *) dialect="sh" ;;
     esac
-    if shellcheck -s "$dialect" "$f"; then
+    # -x lets shellcheck follow `source`d helper libraries (tests/lib/mocks.sh)
+    # instead of emitting SC1091 and failing the run.
+    if shellcheck -x -s "$dialect" "$f"; then
       echo "OK   $f"
     else
       fail=1
@@ -40,6 +42,18 @@ bash "$repo_root/tests/test_claude_hook.sh" || fail=1
 echo
 echo "########## codex AGENTS.md toggle ##########"
 bash "$repo_root/tests/test_codex_agents_toggle.sh" || fail=1
+
+echo
+echo "########## markdown links ##########"
+bash "$repo_root/tests/test_markdown_links.sh" || fail=1
+
+echo
+echo "########## skills.sh CLI ##########"
+bash "$repo_root/tests/test_skills_cli.sh" || fail=1
+
+echo
+echo "########## skills.sh lifecycle (install/update/enable/disable/uninstall) ##########"
+bash "$repo_root/tests/test_install.sh" || fail=1
 
 echo
 if [ "$fail" -eq 0 ]; then
